@@ -1,0 +1,86 @@
+name: Text to Speech CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths: 
+      - 'text-files/**'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'text-files/**'
+  workflow_dispatch:  # Allow manual triggering
+
+jobs:
+  convert-text-to-speech:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 2  # Fetch current and previous commit
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ secrets.AWS_REGION }}
+        # This step automatically sets AWS environment variables
+        # AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_DEFAULT_REGION
+        # These are used by boto3 in the Python script
+    
+    - name: Find changed text files
+      id: changed-files
+      run: |
+        if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+          # Manual trigger - process all text files
+          echo "files=$(find text-files -name '*.txt' | tr '\n' ' ')" >> $GITHUB_OUTPUT
+        else
+          # Automatic trigger - process only changed files
+          changed_files=$(git diff --name-only HEAD~1 HEAD | grep 'text-files.*\.txt$' | tr '\n' ' ')
+          echo "files=${changed_files}" >> $GITHUB_OUTPUT
+        fi
+    
+    - name: Convert text files to speech
+      env:
+        S3_BUCKET_NAME: ${{ secrets.S3_BUCKET_NAME }}
+      run: |
+        files="${{ steps.changed-files.outputs.files }}"
+        if [ -z "$files" ]; then
+          echo "No text files to process"
+          exit 0
+        fi
+        
+        for file in $files; do
+          if [ -f "$file" ]; then
+            echo "Processing: $file"
+            python scripts/convert_text_to_speech.py "$file"
+          fi
+        done
+    
+    - name: Generate summary
+      run: |
+        echo "## Text-to-Speech Conversion Summary" >> $GITHUB_STEP_SUMMARY
+        echo "| File | Status | S3 Location |" >> $GITHUB_STEP_SUMMARY
+        echo "|------|--------|-------------|" >> $GITHUB_STEP_SUMMARY
+        
+        files="${{ steps.changed-files.outputs.files }}"
+        for file in $files; do
+          if [ -f "$file" ]; then
+            filename=$(basename "$file" .txt)
+            s3_url="https://${{ secrets.S3_BUCKET_NAME }}.s3.${{ secrets.AWS_REGION }}.amazonaws.com/audio/${filename}.mp3"
+            echo "| $file | ✅ Converted | [$filename.mp3]($s3_url) |" >> $GITHUB_STEP_SUMMARY
+          fi
+        done

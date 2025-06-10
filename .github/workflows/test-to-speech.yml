@@ -84,3 +84,19 @@ jobs:
             echo "| $file | ✅ Converted | [$filename.mp3]($s3_url) |" >> $GITHUB_STEP_SUMMARY
           fi
         done
+    - name: Debug AWS and S3 setup
+  env:
+    S3_BUCKET_NAME: ${{ secrets.S3_BUCKET_NAME }}
+  run: |
+    echo "=== AWS Configuration ==="
+    aws --version
+    aws sts get-caller-identity
+    echo "Current AWS region: $AWS_DEFAULT_REGION"
+    
+    echo "=== S3 Bucket Testing ==="
+    echo "Bucket name: $S3_BUCKET_NAME"
+    aws s3api head-bucket --bucket "$S3_BUCKET_NAME" || echo "Bucket access failed"
+    aws s3 ls "s3://$S3_BUCKET_NAME" --recursive || echo "Bucket listing failed"
+    
+    echo "=== Polly Testing ==="
+    aws polly describe-voices --language-code en-US --query 'Voices[0]' || echo "Polly access failed"

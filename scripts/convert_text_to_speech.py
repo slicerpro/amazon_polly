@@ -29,13 +29,19 @@ def convert_text_to_speech(file_path: str, voice_id: str = 'Joanna') -> Optional
     
     try:
         # Read text file
-        with open(file_path, 'r') as f:
-            text = f.read()
+        with open(file_path, 'r', encoding='utf-8') as f:
+            text = f.read().strip()
         
         if not text:
             print(f"Warning: {file_path} is empty, skipping...")
             return None
-                
+        
+        # Handle text length limitations
+        original_length = len(text)
+        if original_length > 3000:
+            print(f"Warning: Text in {file_path} exceeds 3000 characters ({original_length}), truncating...")
+            text = text[:3000]
+        
         print(f"Converting {file_path} to speech using voice: {voice_id}")
         print(f"Text length: {len(text)} characters")
         
@@ -43,7 +49,9 @@ def convert_text_to_speech(file_path: str, voice_id: str = 'Joanna') -> Optional
         response = polly.synthesize_speech(
             Text=text,
             OutputFormat='mp3',
-            VoiceId=voice_id
+            VoiceId=voice_id,
+            Engine='standard',  # Use 'neural' for better quality if supported
+            SampleRate='22050'  # Standard sample rate for MP3
         )
         
         # Generate output filename with timestamp

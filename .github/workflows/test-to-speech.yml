@@ -1,42 +1,148 @@
-name: Text to Speech CI/CD Pipeline
+# .github/workflows/text-to-speech.yaml
+name: Text-to-Speech Pipeline
 
 on:
   push:
     branches: [ main, develop ]
-    paths: 
-      - 'text-files/**'
+    paths:
+      - 'texts/**/*.txt'  # Trigger only when text files in texts/ directory change
   pull_request:
     branches: [ main ]
     paths:
-      - 'text-files/**'
-  workflow_dispatch:  # Allow manual triggering
+      - 'texts/**/*.txt'
+  workflow_dispatch:  # Allow manual trigger
+    inputs:
+      text_file:
+        description: 'Path to text file (relative to repo root)'
+        required: true
+        default: 'texts/sample.txt'
+      voice_id:
+        description: 'Polly Voice ID'
+        required: false
+        default: 'Joanna'
+        type: choice
+        options:
+          - Joanna
+          - Matthew
+          - Amy
+          - Brian
+          - Emma
+          - Olivia
+
+env:
+  AWS_REGION: us-east-1
+  S3_BUCKET: your-audio-bucket  # Replace with your S3 bucket name
 
 jobs:
   convert-text-to-speech:
     runs-on: ubuntu-latest
     
+    permissions:
+      contents: read
+      id-token: write  # Required for OIDC authentication
+    
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
       with:
-        fetch-depth: 2  # Fetch current and previous commit
-    
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.9'
-    
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
+        fetch-depth: 2  # Fetch current and previous commit for diff
     
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v4
       with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ${{ secrets.AWS_REGION }}
-        # This step automatically sets AWS environment variables
-        # AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_DEFAULT_REGION
-        # These are used by boto3 in the Python script
+        role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+        aws-region: ${{ env.AWS_REGION }}
+        # Alternative: use access keys instead of OIDC
+        # aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        # aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install boto3 python-dateutil
+    
+    - name: Get changed text files
+      id: changed-files
+      run: |
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          echo "files=${{ github.event.inputs.text_file }}" >> $GITHUB_OUTPUT
+        else
+          # Get changed .txt files in texts/ directory
+          changed_files=$(git diff --name-only HEAD^ HEAD | grep -E '^texts/.*\.txt$' | tr '\n' ' ')
+          echo "files=${changed_files}" >> $GITHUB_OUTPUT
+        fi
+    
+    - name: Convert text files to speech
+      if: steps.changed-files.outputs.files != ''
+      run: |
+        python synthesize.py "${{ steps.changed-files.outputs.files }}" "${{ github.event.inputs.voice_id }}"
+    
+    - name: Upload conversion results
+      if: steps.changed-files.outputs.files != ''
+      uses: actions/upload-artifact@v4
+      with:
+        name: conversion-results
+        path: conversion_results.json
+        retention-days: 30
+    
+    - name: Create job summary
+      if: steps.changed-files.outputs.files != ''
+      run: |
+        if [ -f conversion_results.json ]; then
+          echo "## 🎵 Text-to-Speech Conversion Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          python << 'EOF'
+        import json
+        import os
+        
+        try:
+            with open('conversion_results.json', 'r') as f:
+                results = json.load(f)
+            
+            summary = []
+            summary.append("| Source File | Audio File | Voice | Characters | S3 Location |")
+            summary.append("|-------------|------------|-------|------------|-------------|")
+            
+            for result in results:
+                summary.append(f"| `{result['source_file']}` | `{result['audio_file']}` | {result['voice_id']} | {result['character_count']} | [S3 Link]({result['s3_url']}) |")
+            
+            for line in summary:
+                print(line)
+                
+        except Exception as e:
+            print(f"Error generating summary: {e}")
+        EOF
+        fi
+    
+    - name: Comment on PR (if applicable)
+      if: github.event_name == 'pull_request' && steps.changed-files.outputs.files != ''
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          
+          if (fs.existsSync('conversion_results.json')) {
+            const results = JSON.parse(fs.readFileSync('conversion_results.json', 'utf8'));
+            
+            let comment = '## 🎵 Text-to-Speech Conversion Results\n\n';
+            comment += `Generated ${results.length} audio file(s) from your text changes:\n\n`;
+            
+            results.forEach(result => {
+              comment += `- **${result.source_file}** → \`${result.audio_file}\` (${result.character_count} chars)\n`;
+              comment += `  - Voice: ${result.voice_id}\n`;
+              comment += `  - S3: \`${result.s3_key}\`\n\n`;
+            });
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+          }

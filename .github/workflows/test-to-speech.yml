@@ -31,7 +31,7 @@ on:
 
 env:
   AWS_REGION: us-east-1
-  S3_BUCKET: your-audio-bucket  # Replace with your S3 bucket name
+  S3_BUCKET: polly-demo-2025-luit-jun10
 
 jobs:
   convert-text-to-speech:
@@ -53,8 +53,8 @@ jobs:
         role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
         aws-region: ${{ env.AWS_REGION }}
         # Alternative: use access keys instead of OIDC
-        # aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        # aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
     
     - name: Set up Python
       uses: actions/setup-python@v4

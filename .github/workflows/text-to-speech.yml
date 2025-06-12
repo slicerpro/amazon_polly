@@ -15,7 +15,7 @@ on:
       text_file:
         description: 'Path to text file (relative to repo root)'
         required: true
-        default: 'texts/sample.txt'
+        default: 'texts/speech.txt'
       voice_id:
         description: 'Polly Voice ID'
         required: false

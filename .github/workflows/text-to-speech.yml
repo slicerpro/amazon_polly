@@ -3,11 +3,11 @@ name: Text-to-Speech Pipeline
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ master, develop ]
     paths:
       - 'texts/**/*.txt'  # Trigger only when text files in texts/ directory change
   pull_request:
-    branches: [ main ]
+    branches: [ master ]
     paths:
       - 'texts/**/*.txt'
   workflow_dispatch:  # Allow manual trigger

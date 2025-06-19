@@ -1,4 +1,4 @@
-name: Convert Text to Speech - Beta
+name: Convert_Text_to_Speech_Beta
 
 on:
   pull_request:
